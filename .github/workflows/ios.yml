@@ -1,0 +1,69 @@
+name: iOS (unsigned IPA)
+
+# iOS 打包：只在 Actions 页手动跑（workflow_dispatch），不出 Release。
+# 产物是未签名的 .ipa，下载后用自己的免费 Apple ID 侧载（AltStore / SideStore），
+# 免费证书 7 天过期，过期重签即可。CI 里没有任何 Apple 账号 / 证书 / 密钥。
+#
+# 为什么不用本机打包：Tauri 的 ios 子命令只在 macOS 上有，Linux/Windows 跑不了，
+# 所以用 macos-15 runner（自带 Xcode）。
+#
+# 注意 CLI 版本：本仓库 pin 的 @tauri-apps/cli 是 2.10.1。
+# --no-sign 在 2.12.4 的源码里确认存在；如果 2.10.1 不认这个参数，
+# 本工作流会在 "检查 --no-sign 是否可用" 那步直接报错退出，届时把
+# package.json 里的 @tauri-apps/cli 升到 ^2.12 再跑一次即可。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    name: iOS unsigned IPA
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ios
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 检查 --no-sign 是否可用
+        run: |
+          pnpm tauri ios build --help > /tmp/ios-help.txt 2>&1 || true
+          cat /tmp/ios-help.txt
+          if ! grep -q "no-sign" /tmp/ios-help.txt; then
+            echo "::error::当前 @tauri-apps/cli 不支持 --no-sign，请先把 package.json 里的 @tauri-apps/cli 升到 ^2.12 再跑"
+            exit 1
+          fi
+
+      - name: 生成 iOS 工程
+        run: pnpm tauri ios init --ci
+
+      - name: 同步 iOS 图标
+        run: node scripts/sync-ios-icons.mjs
+
+      - name: 构建未签名 IPA
+        run: pnpm tauri ios build --no-sign --ci
+
+      - name: 列出产物
+        run: |
+          find src-tauri/gen/apple/build -name "*.ipa" -o -name "*.app" -o -name "*.xcarchive" | head -20
+          ls -lh src-tauri/gen/apple/build/arm64/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned
+          path: src-tauri/gen/apple/build/arm64/*.ipa
+          if-no-files-found: error

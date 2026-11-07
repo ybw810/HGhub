@@ -10,14 +10,18 @@ export const APP_VERSION = __APP_VERSION__;
 
 const ua = navigator.userAgent;
 export const isAndroid = /Android/i.test(ua);
-export const isMacos = /Macintosh|Mac OS X/i.test(ua);
-export const platform: "android" | "windows" | "macos" = isAndroid ? "android" : isMacos ? "macos" : "windows";
+/* iOS 的 UA 里也有 "like Mac OS X"，必须先判 iPhone/iPad，否则会被误判成 macOS
+   走桌面壳。iOS 复用 Android 的移动端 UI（MobileShell / 底部 TabBar），所以
+   platform 直接映射成 "android"，isIOS 只用来区分显示文案和自定义协议。 */
+export const isIOS = /iPhone|iPad|iPod/i.test(ua);
+export const isMacos = !isIOS && /Macintosh|Mac OS X/i.test(ua);
+export const platform: "android" | "windows" | "macos" = isAndroid || isIOS ? "android" : isMacos ? "macos" : "windows";
 
 /** 自定义协议地址随平台不同（见 tauri `register_asynchronous_uri_scheme_protocol` 文档）：
  *  Windows / Android → `http://<scheme>.localhost`
  *  macOS / iOS / Linux → `<scheme>://localhost`
  *  Rust 侧 `src-tauri/src/lib.rs` 里改写 m3u8 用的 scheme 必须与此一致。 */
-export const LOCAL = isMacos ? "hg://localhost" : "http://hg.localhost";
+export const LOCAL = isMacos || isIOS ? "hg://localhost" : "http://hg.localhost";
 
 /** src 是否已是本地协议地址（避免在详情页把代理地址再包一层） */
 export const isLocalMedia = (src: string) => src.startsWith(`${LOCAL}/`);

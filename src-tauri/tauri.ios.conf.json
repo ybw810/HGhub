@@ -1,9 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": null
+  },
   "bundle": {
     "iOS": {
-      "minimumSystemVersion": "17.1"
+      "minimumSystemVersion": "15.0"
     }
-  },
-  "identifier": "com.hghub.huangguo"
+  }
 }

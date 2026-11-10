@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore, type Page, type Tab } from "./store";
-import { selfTest } from "./api";
+import { isMobile, selfTest } from "./api";
 import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import { runBack } from "./back";
 import Home from "./pages/Home";
@@ -14,6 +14,7 @@ import LoginModal from "./components/LoginModal";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
+import { tracePlayback } from "./playbackDiagnostics";
 import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF, Logo } from "./icons";
 
 /* ============ 底部标签栏（Android）—— 细瘦纯文字、低侵入 ============ */
@@ -75,15 +76,16 @@ function StackPage({ page, onBack, wide, top, bottomInset }: {
   if (page.kind === "ranks") return <RankPage onBack={onBack} wide={wide} />;
   if (page.kind === "settings") return <SettingsPage onBack={onBack} wide={wide} />;
   if (page.kind === "posts") return <PostsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "post") return <PostDetail id={page.id} onBack={onBack} />;
+  if (page.kind === "post") return <PostDetail id={page.id} onBack={onBack} active={top} />;
   return null;
 }
 
 /* ============ 应用主体 ============ */
 function AppBody() {
-  const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs } = useStore();
+  const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, clean } = useStore();
+  const isMobile = platform === "android" || platform === "ios";
   const mainRef = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(platform !== "android");
+  const [wide, setWide] = useState(!isMobile);
   const [collapsed, setCollapsed] = useState(false);
 
   useLayoutEffect(() => {
@@ -116,19 +118,19 @@ function AppBody() {
 
   const vis = (k: Tab) => (tab === k ? "absolute inset-0" : "absolute inset-0 invisible pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
-  const bottomInset = platform === "android" ? (fs ? 0 : 40) : 14;
+  const bottomInset = isMobile ? (fs || clean ? 0 : 40) : 14;
   /* 栈页（从搜索/分类/我的进入的播放页、图文页）没有底栏，
      底部只让出安全区。之前多留了 20px，视频底边会露出一条
      「底栏」似的窄缝（底部的压暗渐变到不了屏幕最底）。 */
-  const stackInset = platform === "android" ? 0 : 14;
+  const stackInset = isMobile ? 0 : 14;
 
   return (
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
-      {platform !== "android" && <DesktopRail collapsed={collapsed} />}
+      {!isMobile && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
         <div className={vis("home")}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
         <div className={vis("search")}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-        <div className={vis("category")}><Category wide={wide} /></div>
+        <div className={vis("category")}><Category wide={wide} active={pageActive && tab === "category"} /></div>
         <div className={vis("profile")}><Profile wide={wide} /></div>
 
         {stack.map((p, i) => (
@@ -137,7 +139,7 @@ function AppBody() {
           </div>
         ))}
 
-        {platform === "android" && !fs && stack.length === 0 && <TabBar />}
+        {isMobile && !fs && !clean && stack.length === 0 && <TabBar />}
       </div>
     </div>
   );
@@ -200,7 +202,7 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
       <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main ${theater ? "is-theater-main" : ""}`}>
         <div className={vis("home")}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
         <div className={vis("search")}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-        <div className={vis("category")}><Category wide={wide} /></div>
+        <div className={vis("category")}><Category wide={wide} active={pageActive && tab === "category"} /></div>
         <div className={vis("profile")}><Profile wide={wide} /></div>
         {stack.map((p, i) => (
           <div key={p.key} className="absolute inset-0 z-30 bg-bg win-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
@@ -214,9 +216,10 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
 
 /* ============ 移动端（无壳） ============ */
 function MobileShell() {
+  const { platform } = useStore();
   return (
-    <div className="absolute inset-0 flex flex-col bg-canvas plat-android"
-      style={{ "--sat": "max(env(safe-area-inset-top), 8px)", "--sab": "max(env(safe-area-inset-bottom), 6px)" } as React.CSSProperties}>
+    <div className={`absolute inset-0 flex flex-col bg-canvas plat-${platform}`}
+      style={{ "--sat": "max(env(safe-area-inset-top), 12px)", "--sab": "max(env(safe-area-inset-bottom), 16px)" } as React.CSSProperties}>
       <div className="relative flex-1 min-h-0">
         <AppBody />
       </div>
@@ -227,6 +230,9 @@ function MobileShell() {
 /* ============ 入口 ============ */
 export default function App() {
   const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs } = useStore();
+  useEffect(() => {
+    tracePlayback("navigation.change", { tab, stack: stack.map(p => ({ page: p.kind, key: p.key })), login_open: loginOpen });
+  }, [tab, stack, loginOpen]);
 
   /* —— 安卓硬件返回键 ——
      层级：全屏 → 面板/弹层 → 登录框 → 页面栈 → 回首页 → 退出应用。
@@ -271,7 +277,7 @@ export default function App() {
 
   return (
     <>
-      {platform === "android" ? <MobileShell /> : <DesktopShell />}
+      {isMobile ? <MobileShell /> : <DesktopShell />}
       <LoginModal />
       <ToastHost />
       {/* 登录遮罩键盘处理占位 */}

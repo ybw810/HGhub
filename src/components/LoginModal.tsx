@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, platform } from "../api";
+import { api, isMobile } from "../api";
 import type { User } from "../types";
 import { useStore } from "../store";
 import { Modal, Sheet } from "./ui";
@@ -68,12 +68,12 @@ export default function LoginModal() {
         </button>
       </div>
       <p className="text-[10.5px] text-dim mt-3 leading-relaxed">
-        使用黄果短剧官网账号登录，登录态仅保存在本机。
+        使用黄果短剧官网账号登录。登录、注册仅支持固定线路；镜像线路请以游客浏览。
       </p>
     </div>
   );
 
-  return platform === "android"
+  return isMobile
     ? <Sheet open={loginOpen} onClose={() => setLoginOpen(false)}>{body}</Sheet>
     : <Modal open={loginOpen} onClose={() => setLoginOpen(false)} width={360}>{body}</Modal>;
 }

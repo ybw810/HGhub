@@ -1,14 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, APP_VERSION, hostOf, logLine, isIOS, platform, type UpdateInfo } from "../api";
+import { api, APP_VERSION, hostOf, logLine, platform, type UpdateInfo } from "../api";
 import { useStore } from "../store";
 import { Modal, Toggle } from "../components/ui";
 import LinePicker from "../components/LinePicker";
-import { IBack, IBoltF, IBroom, IChevR, IHeart, IInfo, ILink, IMoon, IRefresh, ISettings, ISun } from "../icons";
+import { copyPlaybackLog, initPlaybackLog, setPlaybackLog, usePlaybackLog } from "../playbackDiagnostics";
+import { IBack, IBoltF, IBroom, IChevR, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISettings, ISun, IVolMute } from "../icons";
 
-/* 独立设置页：线路 / 外观 / 本地数据 / 清理缓存 / 网络诊断 / 关于
+/* 独立设置页：线路 / 外观 / 播放 / 本地数据 / 清理缓存 / 网络诊断 / 关于
    入口：Windows 侧栏「设置」、Android「我的」右上角齿轮 */
 export default function Settings({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { theme, setTheme, favs, history, toast } = useStore();
+  const { theme, setTheme, favs, history, muteOnStartup, setMuteOnStartup, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
   const [about, setAbout] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -16,11 +17,14 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [lineBase, setLineBase] = useState("");
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const playbackLog = usePlaybackLog();
+  const [copyingLog, setCopyingLog] = useState(false);
 
   const readLine = () => {
     api.lineState().then((s) => setLineBase(s.base)).catch(() => {});
   };
   useEffect(readLine, []);
+  useEffect(() => { void initPlaybackLog(); }, []);
 
   const checkUpdate = async () => {
     setChecking(true);
@@ -54,7 +58,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <span className="w-9 h-9 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><ISettings size={20} strokeWidth={1.7} /></span>
                 <span className="text-[24px] font-bold tracking-wide text-on">设置</span>
               </div>
-              <div className="text-[11px] text-mut mt-1">外观 · 本地数据 · 诊断</div>
+              <div className="text-[11px] text-mut mt-1">外观 · 播放 · 本地数据 · 诊断</div>
             </div>
           </div>
         </div>
@@ -70,6 +74,17 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[10.5px] text-mut">跟随设计稿的 Fluent 深色</div>
               </div>
               <Toggle on={theme === "dark"} onChange={(on) => setTheme(on ? "dark" : "light")} label="深色外观" />
+            </div>
+          </Section>
+
+          <Section title="播放">
+            <div className="flex items-center gap-3 px-3.5 py-3">
+              <span className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-primary"><IVolMute size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] text-on">启动时静音</div>
+                <div className="text-[10.5px] text-mut">默认开启，每次启动均静音；关闭后记住上次静音状态。下次启动生效。</div>
+              </div>
+              <Toggle on={muteOnStartup} onChange={setMuteOnStartup} label="启动时静音" />
             </div>
           </Section>
 
@@ -100,6 +115,27 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               </div>
               <IChevR size={15} className="text-mut" />
             </button>
+            <div className="flex items-center gap-3 px-3.5 py-3">
+              <span className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-primary"><ILockF size={15} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] text-on">严格安全模式</div>
+                <div className="text-[10.5px] text-mut">
+                  {cliRelaxed
+                    ? "已由启动参数 --no-strict 切换为兼容模式；可手动重新开启"
+                    : "默认开启，防上游投毒与内网探测；若导致正文或特殊代理异常可关闭（或用 --no-strict 启动）"}
+                </div>
+              </div>
+              <Toggle
+                on={strictSecurity}
+                disabled={!strictSecurityReady || securityPending}
+                onChange={(on) => {
+                  void setStrictSecurity(on).then(() => {
+                    toast(on ? "已开启严格安全模式" : "已切换为兼容模式（关闭激进清洗与守卫）", "info");
+                  }).catch(() => toast("安全设置保存失败，已保持原模式", "info"));
+                }}
+                label="严格安全模式"
+              />
+            </div>
             {/* 打不开时先点这里：把 DNS / 代理 / HTTP 结果复制给维护者 */}
             <button onClick={async () => {
               try {
@@ -115,6 +151,32 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               <div className="flex-1">
                 <div className="text-[12.5px] text-on">网络诊断</div>
                 <div className="text-[10.5px] text-mut">检测 DNS / 系统代理 / 官网连通性</div>
+              </div>
+              <IChevR size={15} className="text-mut" />
+            </button>
+          </Section>
+
+          <Section title="播放诊断">
+            <div className="flex items-center gap-3 px-3.5 py-3">
+              <span className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-primary"><IInfo size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] text-on">播放诊断日志</div>
+                <div className="text-[10.5px] text-mut">记录点击、拖动、切页和缓冲过程；复现问题后可关闭并复制日志</div>
+                {playbackLog.error && <div role="alert" className="text-[10.5px] text-danger">{playbackLog.error}</div>}
+              </div>
+              <Toggle label="播放诊断日志" on={playbackLog.enabled} disabled={!playbackLog.ready || playbackLog.pending}
+                onChange={(on) => { void setPlaybackLog(on).then(() => toast(on ? "已开启播放诊断，请复现问题" : "已关闭播放诊断，已有日志保留", "ok")).catch(() => toast("日志设置保存失败，请重试", "info")); }} />
+            </div>
+            <button disabled={!playbackLog.ready || playbackLog.pending || copyingLog} onClick={async () => {
+              setCopyingLog(true);
+              try { await copyPlaybackLog(); toast("播放诊断日志已复制", "ok"); }
+              catch (e) { toast((e as Error).message || "复制日志失败", "info"); }
+              finally { setCopyingLog(false); }
+            }} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
+              <span className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-primary"><ILink size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] text-on">{copyingLog ? "正在复制…" : "复制播放诊断日志"}</div>
+                <div className="text-[10.5px] text-mut break-all">{playbackLog.path || "日志仅保存在本机"}</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </button>
@@ -139,7 +201,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             </button>
           </Section>
 
-          <div className="text-center text-[10px] text-dim mt-5">HGhub {APP_VERSION} · {isIOS ? "iOS" : platform === "android" ? "Android" : platform === "macos" ? "macOS" : "Windows"} 客户端</div>
+          <div className="text-center text-[10px] text-dim mt-5">HGhub {APP_VERSION} · {platform === "android" ? "Android" : platform === "ios" ? "iOS" : platform === "macos" ? "macOS" : platform === "linux" ? "Linux" : "Windows"} 客户端</div>
         </div>
       </div>
 
@@ -156,7 +218,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           </div>
 
           <p className="text-[12px] text-on/70 leading-relaxed mt-4">
-            基于 Rust + Tauri 2 构建的跨平台客户端，支持 Windows、macOS 与 Android。
+            基于 Rust + Tauri 2 构建的跨平台客户端，支持 Windows、macOS、Android 与 Linux。
             界面遵循 Fluent 设计语言，播放器采用沉浸式竖屏信息流。
           </p>
 

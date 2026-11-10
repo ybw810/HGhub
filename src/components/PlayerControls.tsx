@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtTime } from "../api";
-import { ICheck, ICompress, IExpand, INext, IPauseF, IPip, IPlayF, ITheater, IVol, IVolMute } from "../icons";
+import { useSeekInput } from "../useSeekInput";
+import { ICheck, ICompress, IExpand, ILockF, INext, IPauseF, IPip, IPlayF, ITheater, IVol, IVolMute } from "../icons";
 
 type Props = {
   paused: boolean;
@@ -13,14 +14,18 @@ type Props = {
   theater?: boolean;
   fullscreen?: boolean;
   visible?: boolean;
+  seekEnabled?: boolean;
+  seekKey?: string;
   nextDisabled?: boolean;
   nextTitle?: string;
   onToggle: () => void;
-  onSeek: (t: number) => void;
+  onSeek: (t: number, source?: string) => void;
+  onSeekInteraction?: (phase: string, input: string, target: number, pointerTarget?: number) => void;
   onRate: (r: number) => void;
   onMute: () => void;
   onVolume: (v: number) => void;
   onPip: () => void;
+  onLock: () => void;
   onTheater?: () => void;
   onFullscreen: () => void;
   onNext?: () => void;
@@ -30,11 +35,13 @@ const clock = (s: number) => fmtTime(Math.max(0, s || 0)).padStart(5, "0");
 
 export default function PlayerControls({
   paused, time, duration, buffered = 0, rate, muted, volume, theater = false, fullscreen = false,
-  visible = true, nextDisabled = false, nextTitle = "下一个", onToggle, onSeek, onRate, onMute, onVolume, onPip, onTheater, onFullscreen, onNext,
+  visible = true, seekEnabled = true, seekKey, nextDisabled = false, nextTitle = "下一个", onToggle, onSeek, onSeekInteraction, onRate, onMute, onVolume, onPip, onLock, onTheater, onFullscreen, onNext,
 }: Props) {
   const [speedOpen, setSpeedOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
-  const pct = duration ? Math.min(100, (time / duration) * 100) : 0;
+  const seek = useSeekInput({ time, duration, enabled: seekEnabled, resetKey: seekKey, onInteraction: onSeekInteraction,
+    onSeek: (target, input) => onSeek(target, `desktop_${input}`) });
+  const pct = duration ? Math.min(100, (seek.time / duration) * 100) : 0;
 
   useEffect(() => {
     if (!speedOpen) return;
@@ -46,13 +53,12 @@ export default function PlayerControls({
   return (
     <div ref={boxRef} className={`desktop-controls ${fullscreen ? "is-fullscreen" : ""} ${visible ? "" : "is-hidden"}`}
       onPointerDown={(e) => e.stopPropagation()}>
-      <div className="desktop-seek">
+      <div className={`desktop-seek ${seekEnabled ? "is-seekable" : ""}`}>
         <div className="desktop-seek-track">
           <span className="desktop-seek-buffer" style={{ width: `${Math.min(1, buffered) * 100}%` }} />
           <span className="desktop-seek-played" style={{ width: `${pct}%` }} />
         </div>
-        <input aria-label="播放进度" type="range" min={0} max={duration || 1} step={0.01} value={Math.min(time, duration || 0)}
-          onChange={(e) => onSeek(Number(e.target.value))} />
+        <input aria-label="播放进度" type="range" {...seek.inputProps} />
       </div>
 
       <div className="desktop-control-row">
@@ -64,7 +70,7 @@ export default function PlayerControls({
             <INext size={18} strokeWidth={1.7} />
           </button>
         )}
-        <span className="player-timecode"><span>{clock(time)}</span><span className="player-time-separator">/</span>{clock(duration)}</span>
+        <span className="player-timecode"><span>{clock(seek.time)}</span><span className="player-time-separator">/</span>{clock(duration)}</span>
         <div className="player-control-spacer" />
         <div className="player-speed-slot">
           <button className={`player-control player-speed ${rate !== 1 ? "is-on" : ""}`} aria-label="倍速" aria-expanded={speedOpen}
@@ -93,6 +99,7 @@ export default function PlayerControls({
           </div>
         </div>
         <button className="player-control" aria-label="画中画" data-tooltip="画中画" onClick={onPip}><IPip size={20} strokeWidth={1.6} /></button>
+        <button className="player-control" aria-label="锁定播放控制" aria-pressed={false} data-tooltip="锁定播放控制" onClick={onLock}><ILockF size={18} /></button>
         {!fullscreen && onTheater && (
           <button className={`player-control ${theater ? "is-on" : ""}`} aria-label="影院模式" aria-pressed={theater}
             data-tooltip="影院模式 T" onClick={onTheater}><ITheater size={20} strokeWidth={1.6} /></button>
